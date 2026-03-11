@@ -78,10 +78,9 @@ idf.py -p /dev/ttyUSB0 flash monitor
 # 🎮 Button Layout
 
 ```
-         [UP]
-   [LEFT] [A] [RIGHT]    [START]  [MENU]
-        [DOWN]
-   [B]         [X]
+         [UP]           [X]
+   [LEFT]    [RIGHT]       [A] 
+        [DOWN]           [B]              [MENU]       [START]                
 ```
 
 | Button | Function |
