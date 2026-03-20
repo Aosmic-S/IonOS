@@ -1,0 +1,11 @@
+IonOS
+Copyright 2024 IonOS Contributors
+
+This product includes software developed as part of the IonOS project.
+Built with ESP-IDF, FreeRTOS, and LVGL (each under their own licenses).
+
+LVGL: MIT License — https://github.com/lvgl/lvgl
+ESP-IDF: Apache 2.0 — https://github.com/espressif/esp-idf
+FreeRTOS: MIT License — https://www.freertos.org
+led_strip: Apache 2.0 — https://github.com/espressif/idf-extra-components
+Peanut-GB (emulator core): MIT — https://github.com/deltabeard/Peanut-GB

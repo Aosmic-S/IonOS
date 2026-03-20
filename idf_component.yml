@@ -1,0 +1,16 @@
+## IonOS Component Dependencies
+dependencies:
+  lvgl/lvgl:
+    version: "~8.3.0"
+    rules:
+      - if: "idf_version >=5.0"
+  esp_lvgl_port:
+    version: "~1.4.0"
+  led_strip:
+    version: "~2.4.0"
+  espressif/esp_codec_dev:
+    version: "^1.0.0"
+    rules:
+      - if: "idf_version >=5.0"
+  espressif/esp_bt:
+    version: "*"
