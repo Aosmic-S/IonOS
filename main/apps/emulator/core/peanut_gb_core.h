@@ -21,6 +21,7 @@
 #define ENABLE_LCD                  1
 #define ENABLE_SOUND                0
 #define PEANUT_GB_HIGH_LCD_ACCURACY 1
+#define PEANUT_GB_IS_CGB 1
 
 #include "peanut_gb.h"
 #include <stdint.h>
