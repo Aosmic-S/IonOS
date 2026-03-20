@@ -1,202 +1,1359 @@
-# ⚡ IonOS — Embedded Handheld Operating System
+# IonOS
 
-![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)
-![Platform](https://img.shields.io/badge/Platform-ESP32--S3-orange)
-![Framework](https://img.shields.io/badge/Framework-ESP--IDF%20v5+-green)
-![UI](https://img.shields.io/badge/UI-LVGL%208.3-purple)
-![Kernel](https://img.shields.io/badge/Kernel-FreeRTOS-red)
-![Status](https://img.shields.io/badge/Status-Active%20Development-brightgreen)
+> A modular embedded operating system for the ESP32-S3 — kernel, event bus, 7 hardware drivers, full LVGL UI engine, 6 built-in apps, GB/GBC/GBA emulator, AI chatbot, WiFi, PCM audio, RGB LEDs, SD card, nRF24 radio, custom asset pipeline, and a full Developer SDK.
 
-> **IonOS** is a powerful **embedded handheld operating system** built for **ESP32-S3 devices**, designed to power portable electronics with a modern UI, modular apps, WiFi connectivity, audio playback, and retro gaming support.
 
 ```
-╔══════════════════════════════════════════════════════╗
-║                    IonOS v1.0.0                      ║
-║          ESP32-S3 Handheld OS Platform               ║
-║    Boot → Home → Apps → Music → Browser → Games     ║
-╚══════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════╗
+║  ██╗ ██████╗ ███╗  ██╗ ██████╗ ███████╗                 ║
+║  ██║██╔═══██╗████╗ ██║██╔═══██╗██╔════╝                 ║
+║  ██║██║   ██║██╔██╗██║██║   ██║███████╗                 ║
+║  ██║██║   ██║██║╚████║██║   ██║╚════██║                 ║
+║  ██║╚██████╔╝██║ ╚███║╚██████╔╝███████║                 ║
+║  ╚═╝ ╚═════╝ ╚═╝  ╚══╝ ╚═════╝ ╚══════╝  v1.0.0        ║
+╚════════════════
+
+---
+
+## Table of Contents
+
+1. [Hardware](#1-hardware)
+2. [Project Structure](#2-project-structure)
+3. [Quick Start](#3-quick-start)
+4. [Asset Pipeline](#4-asset-pipeline)
+5. [Kernel & Boot Sequence](#5-kernel--boot-sequence)
+6. [Event Bus](#6-event-bus)
+7. [Hardware Drivers](#7-hardware-drivers)
+8. [UI Engine](#8-ui-engine)
+9. [Built-in Apps](#9-built-in-apps)
+10. [Services](#10-services)
+11. [Themes](#11-themes)
+12. [Developer SDK — Writing Your Own App](#12-developer-sdk--writing-your-own-app)
+13. [SD Card Layout](#13-sd-card-layout)
+14. [Button Map](#14-button-map)
+15. [Pin Reference](#15-pin-reference)
+16. [Performance Tuning](#16-performance-tuning)
+17. [Troubleshooting](#17-troubleshooting)
+18. [Contributing](#18-contributing)
+
+---
+
+## 1. Hardware
+
+| Component | Part | Interface |
+|-----------|------|-----------|
+| MCU | ESP32-S3 (dual-core 240 MHz, **2 MB PSRAM**, **8 MB Flash**) | — |
+| Display | ST7789V 240×320 IPS **(landscape 320×240)** | SPI2 @ 40 MHz DMA |
+| Audio DAC | PCM5102A | I2S0 44100 Hz stereo |
+| RGB LEDs | 7× WS2812B | RMT GPIO48 |
+| Buttons | 9× tactile (active LOW) | GPIO direct |
+| SD Card | microSD (FAT32) | SPI3 |
+| Radio | nRF24L01+ | SPI2 (shared CS) |
+| WiFi/BT | ESP32-S3 internal | — |
+| Battery | LiPo via ADC1_CH0 | GPIO1 |
+
+---
+
+## 2. Project Structure
+
+```
+IonOS/
+├── main/
+│   ├── main.cpp                    ← app_main entry point
+│   ├── config/
+│   │   ├── pin_config.h            ← All GPIO assignments
+│   │   ├── ion_config.h            ← Enums, colors, constants
+│   │   └── lv_conf.h               ← LVGL configuration
+│   ├── kernel/
+│   │   ├── kernel.h/.cpp           ← IonKernel singleton, 5-phase boot
+│   │   ├── task_manager.h/.cpp     ← FreeRTOS task registry
+│   │   └── memory_manager.h/.cpp   ← Heap/PSRAM monitoring
+│   ├── drivers/
+│   │   ├── display/                ← ST7789V SPI DMA + LVGL flush
+│   │   ├── audio/                  ← PCM5102A I2S streaming
+│   │   ├── input/                  ← 9-button debounce + LVGL keypad
+│   │   ├── rgb/                    ← WS2812B RMT animations
+│   │   ├── storage/                ← SD card FAT/VFS
+│   │   └── wireless/               ← WiFi STA + nRF24L01+
+│   ├── ui/
+│   │   ├── ui_engine.h/.cpp        ← LVGL init, 60fps loop, mutex
+│   │   ├── boot_animation.h/.cpp   ← 30-frame animated boot
+│   │   ├── homescreen.h/.cpp       ← 3×3 icon grid launcher
+│   │   ├── statusbar.h/.cpp        ← WiFi/battery/time overlay
+│   │   └── notification_popup.h/.cpp ← Slide-in toast notifications
+│   ├── apps/
+│   │   ├── app_manager.h/.cpp      ← IonApp base + registry
+│   │   ├── settings/               ← WiFi, display, audio, theme, info
+│   │   ├── music_player/           ← SD WAV player + playlist
+│   │   ├── browser/                ← HTTP content browser
+│   │   ├── chatbot/                ← Offline AI + OpenAI API mode
+│   │   ├── file_manager/           ← SD directory browser
+│   │   └── emulator/               ← GB/GBC/GBA (Peanut-GB)
+│   ├── services/
+│   │   ├── wifi_manager            ← NVS credentials, auto-connect
+│   │   ├── audio_manager           ← Sound facade + system sounds
+│   │   ├── power_manager           ← Battery ADC, auto-sleep
+│   │   ├── fs_manager              ← File I/O facade
+│   │   └── notification_service    ← Popup + LED + sound coordinator
+│   ├── resources/
+│   │   ├── resource_loader.h/.cpp  ← Central asset API
+│   │   └── generated/              ← ← AUTO-GENERATED by tools/gen_assets.py
+│   │       ├── ion_icons.h/.c      ←   33 × 32×32 RGB565 icons
+│   │       ├── ion_sounds.h/.c     ←   5 synthesized PCM16 sounds
+│   │       ├── ion_boot_frames.h/.c←   30 × 120×80 boot animation frames
+│   │       └── ion_font_7x10.h/.c  ←   Custom 7×10 bitmap font
+│   ├── themes/
+│   │   └── ion_themes.h/.cpp       ← 3 themes + NVS persistence
+│   └── fonts/
+│       └── ion_fonts.h/.cpp        ← Font registry + lv_font_conv guide
+├── sdk/
+│   ├── include/ion_sdk.h           ← Single-header developer SDK
+│   └── examples/
+│       ├── hello_world_app.h       ← Minimal app template
+│       └── widget_gallery.h        ← LVGL widget showcase
+├── tools/
+│   ├── gen_assets.py               ← Asset generator (Python)
+│   ├── flash.sh                    ← Build + flash + monitor helper
+│   ├── monitor.sh                  ← Serial monitor only
+│   └── erase_nvs.sh                ← Clear NVS/settings
+├── docs/
+│   └── [this file]
+├── CMakeLists.txt
+├── sdkconfig.defaults              ← 240MHz, OCT PSRAM, 16MB flash
+├── partitions.csv                  ← nvs/factory/ota_0/ota_1/storage
+└── idf_component.yml               ← LVGL, led_strip dependencies
 ```
 
 ---
 
-# 🚀 Quick Start
+## 3. Quick Start
 
-### 1. Install ESP-IDF
-
-IonOS requires **ESP-IDF v5.1+**
+### Prerequisites
 
 ```bash
-git clone --recursive https://github.com/espressif/esp-idf.git
-cd esp-idf
+# ESP-IDF v5.1+ (required for ESP32-S3 I2S v2 API)
+git clone --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+cd ~/esp/esp-idf && git checkout v5.1.2
 ./install.sh esp32s3
 source export.sh
+
+# Python deps for asset generator
+pip install Pillow numpy
 ```
 
-### 2. Build IonOS
+### Build & Flash
 
 ```bash
-git clone https://github.com/Aosmic-S/IonOS.git
 cd IonOS
 
+# Step 1 — Generate all assets from source
+python3 tools/gen_assets.py
+
+# Step 2 — Set target
 idf.py set-target esp32s3
+
+# Step 3 — Build
 idf.py build
+
+# Step 4 — Flash (replace /dev/ttyUSB0 with your port)
+idf.py -p /dev/ttyUSB0 flash monitor
+
+# Or use the helper script:
+./tools/flash.sh /dev/ttyUSB0
 ```
 
-### 3. Flash to Device
+### First Boot
+
+On first boot IonOS will:
+1. Run the 30-frame animated boot sequence (1.5 seconds)
+2. Mount the SD card (non-fatal if absent)
+3. Auto-connect to the last saved WiFi network
+4. Show the home screen with app grid
+5. Play the boot jingle through PCM5102A
+
+---
+
+## 4. Asset Pipeline
+
+All assets are **generated entirely from code** — no external image/audio files needed. Run `python3 tools/gen_assets.py` any time to regenerate.
+
+### What Gets Generated
+
+| File | Content | Size |
+|------|---------|------|
+| `ion_icons.c` | 33 custom 32×32 RGB565 icons as C arrays | ~68 KB |
+| `ion_sounds.c` | 5 synthesized PCM16 stereo sounds | ~197 KB |
+| `ion_boot_frames.c` | 30 animated 120×80 RGB565 boot frames | ~864 KB |
+| `ion_font_7x10.c` | 7×10 bitmap font (ASCII 32–126) | ~1 KB |
+
+### Icon List
+
+```
+settings  wifi      music     files     browser   chatbot
+emulator  power     battery   volume    play      pause
+next      prev      folder    home      back      add
+delete    search    lock      star      cloud     radio
+controller heart    map       download  info      check
+warning   clock     edit
+```
+
+### Sounds
+
+| Name | Description | Duration |
+|------|-------------|----------|
+| `click` | Short 880 Hz tap | 40 ms |
+| `notification` | Two-tone ascending C5→E5 | 190 ms |
+| `error` | Descending buzz 300→180 Hz | 150 ms |
+| `boot` | 4-note ascending jingle | ~600 ms |
+| `success` | Upward G4→C5 chime | 170 ms |
+
+### Adding Custom Icons
+
+Edit `tools/gen_assets.py` and add a draw function:
+
+```python
+def icon_myapp():
+    img, d = new_icon()          # 32×32 RGBA canvas, dark bg
+    circle_bg(d, SURFACE)        # optional rounded background
+
+    # Draw with Pillow ImageDraw
+    d.ellipse([8, 8, 24, 24], outline=ACCENT, width=2)
+    d.line([(16, 8), (16, 24)], fill=ACCENT, width=2)
+    return img
+
+# Register it
+ICONS = [
+    ...
+    ("myapp", icon_myapp),   # → ION_ICON_MYAPP enum value
+]
+```
+
+Re-run `gen_assets.py` and the new icon is available as `ION_ICON_MYAPP`.
+
+### Adding Custom Sounds
+
+```python
+def sound_mysound():
+    s = fade(sine(440, 100, 16000), 10, 30)   # 440 Hz, 100ms, amp 16000
+    return to_stereo(s)
+
+SOUNDS = [
+    ...
+    ("mysound", sound_mysound),
+]
+```
+
+Then play it: `AudioManager::getInstance().playSystemSound("mysound");`
+
+### Custom Fonts (via lv_font_conv)
 
 ```bash
-idf.py -p /dev/ttyUSB0 flash monitor
+npm install -g lv_font_conv
+
+# Download a font (Orbitron recommended for IonOS aesthetic)
+# https://fonts.google.com/specimen/Orbitron
+
+lv_font_conv \
+  --font Orbitron-Regular.ttf \
+  --size 14 --bpp 4 \
+  --format lvgl \
+  --range 0x20-0x7F \
+  --no-compress \
+  -o main/fonts/ion_font_orbitron_14.c
+
+# Add LV_FONT_DECLARE(ion_font_orbitron_14) in ion_fonts.h
+# Then use:  ion_font_get(ION_FONT_ORBITRON, 14)
 ```
 
 ---
 
-# 📦 Feature Matrix
+## 5. Kernel & Boot Sequence
 
-| Feature | Status | Details |
-|------|------|------|
-| Boot Animation | ✅ | IonOS logo with animated progress bar |
-| Home Screen | ✅ | 3×3 icon grid with D-Pad navigation |
-| Status Bar | ✅ | WiFi, battery %, and time display |
-| Notifications | ✅ | Slide-in notifications with LED + sound |
-| Settings App | ✅ | WiFi, brightness, volume, system info |
-| File Manager | ✅ | Browse SD card files |
-| Music Player | ✅ | WAV / MP3 playback with playlist |
-| Browser | ✅ | Lightweight HTTP text browser |
-| Chatbot | ✅ | Offline rules + OpenAI API support |
-| GameBoy Emulator | ⚙️ | ROM loader and emulator interface |
-| WiFi Manager | ✅ | Scan and auto connect |
-| Audio System | ✅ | PCM5102A I2S DAC |
-| RGB LED Engine | ✅ | WS2812B animations |
-| nRF24 Radio | ✅ | SPI wireless communication |
-| Power Manager | ✅ | Battery monitoring and sleep |
-| External Apps | ✅ | Dynamic SD card apps |
-| PSRAM Support | ✅ | Large buffers and ROM loading |
-| OTA Updates | 🔄 | Partition ready |
-
----
-
-# 🎮 Button Layout
+`IonKernel` is a singleton that orchestrates the entire system through a 5-phase boot:
 
 ```
-         [UP]           [X]
-   [LEFT]    [RIGHT]       [A] 
-        [DOWN]           [B]              [MENU]       [START]                
+Phase 1 — HARDWARE   (~200 ms)
+  nvs_flash_init → ST7789V → ButtonDriver → PCM5102A
+  → SD card → WS2812B boot sweep → WiFi init → nRF24
+
+Phase 2 — UI         (~50 ms)
+  lv_init → LVGL display buffer (PSRAM) → theme load
+  → keypad indev → boot animation starts (non-blocking)
+
+Phase 3 — SERVICES   (~10 ms)
+  AudioManager → FSManager → WiFiManager (auto-connect)
+  → NotificationService → PowerManager
+
+Phase 4 — APPS       (~5 ms)
+  AppManager registers 6 built-in apps
+
+Phase 5 — TASKS      (~5 ms)
+  Spawns 6 FreeRTOS tasks (see table below)
+  Boot complete → plays boot sound → home screen loads
 ```
 
-| Button | Function |
-|------|------|
-| D-Pad | Navigate UI |
-| A | Select |
-| B | Back |
-| X | Secondary action |
-| START | App switcher |
-| MENU | System menu |
+### FreeRTOS Tasks
 
----
+| Task | Core | Priority | Stack | Function |
+|------|------|----------|-------|---------|
+| `ion_events` | 0 | HIGH (8) | 4 KB | Event bus dispatch loop |
+| `ion_ui` | 1 | HIGH (8) | 8 KB | `lv_timer_handler` @ 60 fps |
+| `ion_audio` | 0 | REALTIME (12) | 4 KB | I2S PCM streaming |
+| `ion_input` | 0 | NORMAL (5) | 2 KB | Button poll @ 100 Hz |
+| `ion_leds` | 0 | LOW (2) | 2 KB | WS2812B animation |
+| `ion_power` | 0 | LOW (2) | 2 KB | Battery / sleep monitor |
 
-# 🏗 Architecture
+### Kernel API
 
-```
-IonOS Kernel (FreeRTOS)
-    │
-    ├─ Hardware Drivers
-    │     SPI / I2S / RMT / GPIO / ADC
-    │     ST7789V · PCM5102A · WS2812B · nRF24 · SD · WiFi
-    │
-    ├─ UI Engine
-    │     LVGL v8.3
-    │     Boot Animation · Home Screen · Status Bar
-    │
-    ├─ System Services
-    │     WiFi Manager
-    │     Audio Manager
-    │     Power Manager
-    │     File System Manager
-    │     Notification Service
-    │
-    └─ Applications
-          Settings · Files · Music
-          Browser · Chatbot · Emulator
-          + External SD Card Apps
+```cpp
+IonKernel& k = IonKernel::getInstance();
+
+// Post a system event
+k.postEvent(ION_EVENT_WIFI_CONNECTED, 0);
+
+// Subscribe (returns subscription ID)
+int sid = k.subscribeEvent(ION_EVENT_KEY_DOWN, [](const ion_event_t& e) {
+    ESP_LOGI("app", "Key %lu pressed", (unsigned long)e.data);
+});
+
+// Unsubscribe
+k.unsubscribeEvent(sid);
+
+// Create a task
+k.createTask(myTaskFn, "my_task", 4096, nullptr, PRIORITY_NORMAL, CORE_UI);
+
+// Memory info
+ESP_LOGI("app", "Heap: %zu KB  PSRAM: %zu KB",
+         IonKernel::freeHeap()/1024, IonKernel::freePsram()/1024);
+
+// Diagnostics
+k.printTaskList();
+k.printMemStats();
 ```
 
 ---
 
-# 📁 SD Card Layout
+## 6. Event Bus
+
+IonOS uses a non-blocking publish/subscribe event bus backed by a FreeRTOS queue (64 slots).
+
+### Event Types
+
+```cpp
+typedef enum {
+    ION_EVENT_NONE              = 0,
+    // Input
+    ION_EVENT_KEY_DOWN          = 1,   // data = ion_key_t
+    ION_EVENT_KEY_UP            = 2,   // data = ion_key_t
+    ION_EVENT_KEY_LONG          = 3,   // data = ion_key_t (held >800ms)
+    // Network
+    ION_EVENT_WIFI_CONNECTED    = 10,
+    ION_EVENT_WIFI_DISCONNECTED = 11,
+    ION_EVENT_WIFI_SCAN_DONE    = 12,
+    // Power
+    ION_EVENT_BATTERY_LOW       = 20,  // data = percent
+    ION_EVENT_BATTERY_CRITICAL  = 21,
+    ION_EVENT_BATTERY_CHARGING  = 22,
+    // Audio
+    ION_EVENT_AUDIO_DONE        = 30,
+    // Apps
+    ION_EVENT_APP_LAUNCH        = 40,
+    ION_EVENT_APP_CLOSE         = 41,
+    // UI
+    ION_EVENT_THEME_CHANGE      = 50,
+    // System
+    ION_EVENT_SYSTEM_SLEEP      = 60,
+    ION_EVENT_SYSTEM_WAKE       = 61,
+} ion_event_type_t;
+```
+
+### Subscribe from Any Task
+
+```cpp
+// Subscribe to ALL events (type = ION_EVENT_NONE means wildcard)
+int sid = IonKernel::getInstance().subscribeEvent(ION_EVENT_NONE,
+    [](const ion_event_t& e) {
+        if (e.type == ION_EVENT_KEY_DOWN && e.data == ION_KEY_X) {
+            // handle button A
+        }
+    });
+
+// Subscribe to a specific event
+int wid = IonKernel::getInstance().subscribeEvent(ION_EVENT_WIFI_CONNECTED,
+    [](const ion_event_t& e) {
+        ESP_LOGI("app", "WiFi connected!");
+    });
+
+// Clean up
+IonKernel::getInstance().unsubscribeEvent(sid);
+IonKernel::getInstance().unsubscribeEvent(wid);
+```
+
+### Post from Any Task/ISR
+
+```cpp
+// From a task:
+IonKernel::getInstance().postEvent(ION_EVENT_KEY_DOWN, ION_KEY_X);
+
+// With a pointer payload:
+IonKernel::getInstance().postEvent(ION_EVENT_APP_LAUNCH, appIndex, &appPtr);
+```
+
+---
+
+## 7. Hardware Drivers
+
+### ST7789V Display
+
+```cpp
+auto& disp = ST7789Driver::getInstance();
+disp.init();                  // SPI2 @ 40 MHz, dual PSRAM buffers
+disp.setBacklight(80);        // 0–100%
+disp.fillScreen(0x0000);      // RGB565 fill
+disp.fillRect(x, y, w, h, color565);
+
+// LVGL flush is registered automatically in init()
+// Use LVGL APIs to draw; the driver handles hardware transfer
+```
+
+**Display Buffer Architecture:**
+```
+PSRAM Buffer A  [240 × 60 × 2 = 28.8 KB]  ←─ LVGL renders here
+PSRAM Buffer B  [240 × 60 × 2 = 28.8 KB]  ←─ DMA transmits this
+                                               (double-buffered)
+```
+
+### PCM5102A Audio
+
+```cpp
+auto& audio = AudioDriver::getInstance();
+audio.init();                     // I2S0 44100 Hz stereo 16-bit
+audio.setVolume(80);              // Software volume 0–100
+
+// Play from RAM (embedded PCM16 stereo)
+audio.play(ion_sound_boot.data, ion_sound_boot.len * 2);
+
+// Play WAV file from SD card
+audio.playFile("/sdcard/music/song.wav");
+
+// Callback when done
+audio.setDoneCallback([]() {
+    ESP_LOGI("app", "Playback finished");
+});
+
+audio.pause();
+audio.resume();
+audio.stop();
+```
+
+**Audio Task:**
+`ion_audio` runs on Core 0 at REALTIME priority, continuously feeding 512-sample chunks to I2S DMA. Software volume scaling is applied per-chunk.
+
+### WS2812B RGB LEDs
+
+```cpp
+auto& leds = WS2812Driver::getInstance();
+leds.init();
+leds.setBrightness(80);           // 0–255 master brightness
+
+// Set individual pixels
+leds.setPixel(0, {255, 0, 128});  // RGBColor struct
+leds.setAll(RGBColor::CYAN());
+leds.clear();
+leds.show();                      // Push to hardware via RMT
+
+// Built-in animations (run in ion_leds task)
+leds.setAnimation(LEDAnim::RAINBOW);      // Full-spectrum cycle
+leds.setAnimation(LEDAnim::PULSE);        // Breathing cyan
+leds.setAnimation(LEDAnim::WIFI_BLINK);  // Blue blink while connecting
+leds.setAnimation(LEDAnim::BATT_LOW);    // Red warning flash
+leds.setAnimation(LEDAnim::CHARGING);    // Green fill animation
+leds.setAnimation(LEDAnim::MUSIC_BEAT);  // Purple pulse to beat
+leds.setAnimation(LEDAnim::NONE);        // Stop animation
+
+// Notification flash (blocks briefly)
+leds.notificationFlash(RGBColor::GREEN(), 2);  // 2 flashes
+leds.bootSweep();                              // Startup sweep
+```
+
+**HSV Helper:**
+```cpp
+// HSV → RGBColor (static method)
+RGBColor c = WS2812Driver::hsv(195.0f, 1.0f, 0.8f);
+// h: 0–360,  s/v: 0.0–1.0
+```
+
+### 9-Button Input
+
+```cpp
+// Direct state check
+bool pressed = ButtonDriver::getInstance().isPressed(ION_KEY_X);
+
+// Event-driven (preferred)
+IonKernel::getInstance().subscribeEvent(ION_EVENT_KEY_DOWN, [](const ion_event_t& e) {
+    switch ((ion_key_t)e.data) {
+        case ION_KEY_UP:    /* D-pad up   */ break;
+        case ION_KEY_DOWN:  /* D-pad down */ break;
+        case ION_KEY_LEFT:  /* D-pad left */ break;
+        case ION_KEY_RIGHT: /* D-pad right*/ break;
+        case ION_KEY_X:     /* Confirm    */ break;
+        case ION_KEY_B:     /* Back/cancel*/ break;
+        case ION_KEY_A:     /* Action     */ break;
+        case ION_KEY_START: /* Pause/start*/ break;
+        case ION_KEY_MENU:  /* System menu*/ break;
+    }
+});
+
+// Long-press (>800 ms) fires ION_EVENT_KEY_LONG with same key codes
+IonKernel::getInstance().subscribeEvent(ION_EVENT_KEY_LONG, [](const ion_event_t& e) {
+    if (e.data == ION_KEY_MENU) {
+        IonKernel::getInstance().shutdown(); // Long MENU = power off
+    }
+});
+```
+
+### SD Card
+
+```cpp
+auto& sd = SDDriver::getInstance();
+sd.init();  // Mounts FAT at /sdcard
+
+if (sd.isMounted()) {
+    // List directory
+    std::vector<FileEntry> files;
+    sd.listDir("/sdcard/music", files);
+    for (auto& f : files) {
+        ESP_LOGI("app", "%s  %s  %zu bytes",
+                 f.isDir ? "DIR" : "FILE",
+                 f.name.c_str(), f.size);
+    }
+
+    // File queries
+    bool exists = sd.exists("/sdcard/music/song.wav");
+    int64_t size = sd.fileSize("/sdcard/music/song.wav");
+    uint64_t free = sd.freeSpace();    // bytes
+    uint64_t total = sd.totalSpace();  // bytes
+}
+```
+
+### WiFi
+
+```cpp
+auto& wifi = WiFiDriver::getInstance();
+wifi.init();  // STA mode
+
+// Set callback before connecting
+wifi.setCallback([](bool ok, const char* ip) {
+    if (ok) ESP_LOGI("app", "Connected: %s", ip);
+    else    ESP_LOGW("app", "Disconnected");
+});
+
+// Connect (blocks up to 15s)
+esp_err_t r = wifi.connect("MySSID", "password123");
+if (r == ESP_OK) {
+    ESP_LOGI("app", "IP: %s  RSSI: %d dBm",
+             wifi.getIP().c_str(), wifi.getRSSI());
+}
+
+// Scan
+std::vector<WifiNetwork> nets;
+wifi.scan(nets);
+for (auto& n : nets)
+    ESP_LOGI("app", "%s  %d dBm", n.ssid.c_str(), n.rssi);
+
+wifi.disconnect();
+```
+
+### nRF24L01+
+
+```cpp
+auto& nrf = NRF24Driver::getInstance();
+nrf.init();  // SPI @ 8 MHz, channel 76
+
+// Set address (5 bytes)
+uint8_t addr[5] = {0xE7, 0xE7, 0xE7, 0xE7, 0xE7};
+nrf.setAddress(addr);
+nrf.setChannel(76);  // 2476 MHz
+
+// Transmit (returns true on ACK)
+uint8_t payload[32] = "Hello IonOS!";
+bool ok = nrf.send(payload, 32);
+
+// Receive
+nrf.setRxCallback([](const uint8_t* data, uint8_t len) {
+    ESP_LOGI("nrf", "Received %d bytes: %.*s", len, len, data);
+});
+nrf.startListening();
+// pollTask() is called automatically by a kernel task
+```
+
+---
+
+## 8. UI Engine
+
+### Thread Safety
+
+**All LVGL calls must be protected by the UIEngine mutex:**
+
+```cpp
+// Safe pattern for non-UI tasks
+if (UIEngine::getInstance().lock(100)) {  // 100ms timeout
+    lv_label_set_text(myLabel, "updated");
+    UIEngine::getInstance().unlock();
+}
+```
+
+The `ion_ui` task runs `lv_timer_handler()` on Core 1 inside its own lock cycle at 60 fps. Never call LVGL from Core 0 without locking.
+
+### Style Helpers
+
+```cpp
+// Pre-styled panel (dark bg, border, radius)
+UIEngine::stylePanel(lv_obj_t* obj);
+
+// Colored button with focus glow
+UIEngine::styleBtn(lv_obj_t* btn, 0x00D4FF);  // hex color
+
+// Colored label with optional font
+UIEngine::styleLabel(lv_obj_t* lbl, 0xEEF2FF, &lv_font_montserrat_14);
+```
+
+### Screen Transitions
+
+IonOS uses LVGL's built-in screen animations:
+
+```cpp
+// Open app → slide in from right
+lv_scr_load_anim(appScreen, LV_SCR_LOAD_ANIM_MOVE_LEFT, 300, 0, false);
+
+// Close app → slide back to left
+lv_scr_load_anim(homeScreen, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 300, 0, false);
+
+// Fade for boot animation
+lv_scr_load_anim(newScreen, LV_SCR_LOAD_ANIM_FADE_ON, 300, 0, false);
+```
+
+### Notification Popups
+
+```cpp
+NotificationPopup::getInstance().show(
+    "Title",           // Bold header text
+    "Message body",    // Detail text
+    ION_NOTIF_INFO,    // Level: INFO / SUCCESS / WARNING / ERROR
+    3000               // Auto-dismiss after 3000 ms
+);
+```
+
+Popup slides in from the top, overlays all screens, and auto-dismisses. Each level has a distinct accent color and icon:
+
+| Level | Color | Icon |
+|-------|-------|------|
+| `ION_NOTIF_INFO` | Cyan `#00D4FF` | Bell |
+| `ION_NOTIF_SUCCESS` | Green `#00FF9F` | Checkmark |
+| `ION_NOTIF_WARNING` | Amber `#FFB800` | Warning triangle |
+| `ION_NOTIF_ERROR` | Red `#FF3366` | X |
+
+### Boot Animation
+
+The boot animation plays 30 frames of a programmatically generated IonOS logo materialization:
+
+- **Frames 0–8:** Expanding cyan rings radiate from center
+- **Frames 5–20:** "ION" text assembles letter-by-letter from particles
+- **Frames 15–30:** "OS" subtitle fades in with glowing ring; progress bar fills
+
+Each frame is a 120×80 RGB565 image, scaled 2× by LVGL to 240×160 and centered on the 320×240 display (landscape). Total animation: 1.5 seconds at 50 ms/frame.
+
+---
+
+## 9. Built-in Apps
+
+### App Lifecycle
+
+```
+onCreate()  → app is created, build LVGL screen
+onResume()  → app returns to foreground
+onPause()   → app goes to background (another app opened)
+onDestroy() → app is closed, free all resources
+onKey(k, pressed) → button event forwarded by AppManager
+```
+
+### Settings App
+- **Tab: WiFi** — Scan networks, tap to connect, shows current IP
+- **Tab: Display** — Brightness slider (10–100%) controls LEDC PWM
+- **Tab: Audio** — Volume slider (0–100%) controls I2S software gain
+- **Tab: Theme** — Roller to pick Dark Pro / Neon Gaming / Retro Console (saved to NVS)
+- **Tab: Info** — Chip info, IDF version, heap/PSRAM free memory
+
+### Music Player App
+- Scans `/sdcard/music/` for `.wav`, `.mp3`, `.flac` files
+- Album art placeholder with animated LED `MUSIC_BEAT` sync
+- Prev / Play-Pause / Next controls via D-pad and on-screen buttons
+- Auto-advances to next track on playback completion
+- Playlist shown below controls; tap or navigate to select
+
+### Browser App
+- 5 bookmarks: Weather, Quote of the Day, Number Fact, Dad Joke, Cat Fact
+- Fetches via `esp_http_client` in a background FreeRTOS task
+- Strips HTML tags for clean plain-text display
+- Scroll with D-pad UP/DOWN; B = back to bookmarks
+- Requires WiFi — shows error popup if disconnected
+
+### IonBot (Chatbot App)
+- **Offline mode:** 12-rule keyword matcher handles common questions about IonOS
+- **Online mode:** Posts to OpenAI Chat Completions API via HTTPS (requires your API key in `chatbot_app.cpp`)
+- Mode toggle in tab bar; online mode requires active WiFi
+- Scrollable chat log with user/bot message bubbles
+- X = send, B = back
+
+**To add your API key:**
+```cpp
+// In main/apps/chatbot/chatbot_app.cpp, ChatbotApp::apiTask():
+esp_http_client_set_header(c, "Authorization", "Bearer sk-YOUR_KEY_HERE");
+```
+
+### File Manager App
+- Navigates SD card directory tree starting at `/sdcard/`
+- Shows file size, directory hierarchy
+- File type icons: audio, ROM, text, generic
+- X = open/enter directory, A = delete file, B = parent directory / exit
+- Footer shows item count and free space
+
+### App Store
+- Shows all installed SD apps in **Library** tab
+- Scans `/sdcard/apps/` for `.ionapp` packages in **Available** tab
+- Tap any package to see name, version, author, description, permissions
+- **Install App** / **Update** / **Already Installed** status badge
+- Animated progress bar during installation (validate → space check → extract → register)
+- **Uninstall** from Library tab with one tap
+- App appears on home screen immediately after install
+
+### Emulator App
+- System selection: GameBoy, GameBoy Color, GameBoy Advance
+- ROM scanner reads from `/sdcard/roms/gb/`, `/sdcard/roms/gbc/`, `/sdcard/roms/gba/`
+- 160×144 framebuffer in PSRAM, scaled ~1.33× on display
+- FPS counter in HUD overlay
+- START = pause/resume; MENU = back to ROM list
+- **Peanut-GB integration:** Stub is provided. Drop `peanut_gb.h` from [deltabeard/Peanut-GB](https://github.com/deltabeard/Peanut-GB) and implement the 4 callbacks documented in `peanut_gb_core.cpp`
+
+---
+
+## 10. Services
+
+Services are higher-level facades over drivers. Use services in apps; use drivers in services.
+
+### AudioManager
+
+```cpp
+auto& am = AudioManager::getInstance();
+
+// Play WAV from SD
+am.play("/sdcard/music/track.wav", []() {
+    ESP_LOGI("app", "Track finished");
+});
+
+// Play embedded system sound
+am.playSystemSound("click");          // "click","notification","error","boot","success"
+
+am.pause();
+am.resume();
+am.stop();
+am.setVolume(75);                     // 0–100
+uint8_t vol = am.getVolume();
+bool playing = am.isPlaying();
+```
+
+### WiFiManager
+
+```cpp
+auto& wm = WiFiManager::getInstance();
+
+wm.connect("SSID", "password");      // Saves to NVS, shows popup on connect
+wm.disconnect();
+bool ok = wm.isConnected();
+std::string ip = wm.getIP();
+int8_t rssi = wm.getRSSI();
+
+wm.startScan();                       // Async scan
+auto& results = wm.getResults();      // vector<WifiNetwork>
+```
+
+### NotificationService
+
+```cpp
+NotificationService::getInstance().post(
+    "App Name",
+    "Something happened",
+    ION_NOTIF_SUCCESS    // optional, defaults to ION_NOTIF_INFO
+);
+// Automatically: shows popup + plays sound + flashes LEDs
+```
+
+### PowerManager
+
+```cpp
+auto& pm = PowerManager::getInstance();
+
+int pct = pm.getBatteryPercent();    // 0–100
+int mv  = pm.getBatteryMV();         // millivolts
+bool charging = pm.isCharging();     // GPIO CHG_STATUS
+
+pm.resetSleepTimer();                // Call on any user interaction
+// Auto-dim at 60s idle, deep sleep at 120s idle
+```
+
+### FSManager
+
+```cpp
+auto& fs = FSManager::getInstance();
+
+std::string content;
+fs.readFile("/sdcard/data/config.txt", content);
+fs.writeFile("/sdcard/data/output.txt", data, length);
+fs.deleteFile("/sdcard/temp/file.tmp");
+
+std::vector<FileEntry> entries;
+fs.listDir("/sdcard/apps", entries);
+
+uint64_t free  = fs.freeSpace();     // bytes
+uint64_t total = fs.totalSpace();    // bytes
+```
+
+---
+
+## 11. Themes
+
+IonOS ships with 3 themes. The active theme is applied to LVGL's default theme and saved to NVS.
+
+| Theme | Background | Accent | Style |
+|-------|-----------|--------|-------|
+| **Dark Pro** | `#0A0E1A` | `#00D4FF` cyan | Clean cyberpunk |
+| **Neon Gaming** | `#050505` | `#39FF14` green | High-contrast arcade |
+| **Retro Console** | `#101820` | `#FFCC00` amber | Warm classic gaming |
+
+```cpp
+// Apply a theme at runtime
+ion_theme_apply(ION_THEME_NEON_GAMING);
+
+// Save to NVS (persists across reboots)
+ion_theme_save(ION_THEME_NEON_GAMING);
+
+// Load saved theme
+ion_theme_id_t saved = ion_theme_load();
+
+// Get theme color values
+const ion_theme_t* t = ion_theme_get(ION_THEME_DARK_PRO);
+uint32_t accent = t->accent;   // e.g., 0x00D4FF
+```
+
+---
+
+## 12. Developer SDK — Writing Your Own App
+
+### Minimal App (20 lines)
+
+```cpp
+#include "sdk/include/ion_sdk.h"
+
+class MyApp : public IonApp {
+public:
+    void onCreate() override {
+        buildScreen("My App");               // Titled screen with dark bg
+
+        lv_obj_t* lbl = lv_label_create(m_screen);
+        lv_label_set_text(lbl, "Hello IonOS!");
+        UIEngine::styleLabel(lbl, ION_COLOR_ACCENT, &lv_font_montserrat_20);
+        lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
+    }
+
+    void onKey(ion_key_t k, bool pressed) override {
+        if (!pressed) return;
+        if (k == ION_KEY_B) AppManager::getInstance().closeCurrentApp();
+    }
+
+    void onDestroy() override {
+        if (m_screen) { lv_obj_del(m_screen); m_screen = nullptr; }
+    }
+};
+```
+
+### Register the App
+
+```cpp
+// In AppManager::init()  (main/apps/app_manager.cpp)
+registerApp("MyApp", ION_ICON_STAR, 0xFF6B35,
+    []() -> IonApp* { return new MyApp(); });
+```
+
+### App Design Patterns
+
+**Pattern 1: Event-driven (recommended for key handling)**
+```cpp
+void onCreate() override {
+    buildScreen("My App");
+    m_keySubId = IonKernel::getInstance().subscribeEvent(ION_EVENT_KEY_DOWN,
+        [this](const ion_event_t& e) {
+            if (e.data == ION_KEY_X) handleConfirm();
+            if (e.data == ION_KEY_B) AppManager::getInstance().closeCurrentApp();
+        });
+}
+void onDestroy() override {
+    IonKernel::getInstance().unsubscribeEvent(m_keySubId);
+    if (m_screen) { lv_obj_del(m_screen); m_screen = nullptr; }
+}
+int m_keySubId = -1;
+```
+
+**Pattern 2: Background task**
+```cpp
+void onCreate() override {
+    buildScreen("Loading...");
+    // Spawn a background task — never block the UI task
+    xTaskCreate([](void* arg) {
+        MyApp* self = (MyApp*)arg;
+        // do heavy work here (HTTP, file I/O, etc.)
+        std::string result = fetchData();
+
+        // Update UI safely from background task
+        if (UIEngine::getInstance().lock(200)) {
+            lv_label_set_text(self->m_label, result.c_str());
+            UIEngine::getInstance().unlock();
+        }
+        vTaskDelete(nullptr);
+    }, "my_task", 8192, this, 4, nullptr);
+}
+```
+
+**Pattern 3: Timer-driven UI updates**
+```cpp
+void onCreate() override {
+    buildScreen("Dashboard");
+    m_label = lv_label_create(m_screen);
+    // Update UI every second via LVGL timer (runs on UI core, no locking needed)
+    m_timer = lv_timer_create([](lv_timer_t* t) {
+        MyApp* self = (MyApp*)t->user_data;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "Uptime: %lus",
+                 (unsigned long)(esp_timer_get_time() / 1000000));
+        lv_label_set_text(self->m_label, buf);
+    }, 1000, this);
+}
+void onDestroy() override {
+    if (m_timer)  { lv_timer_del(m_timer);  m_timer  = nullptr; }
+    if (m_screen) { lv_obj_del(m_screen);   m_screen = nullptr; }
+}
+lv_obj_t*   m_label = nullptr;
+lv_timer_t* m_timer = nullptr;
+```
+
+### Using Resources in Your App
+
+```cpp
+#include "resources/resource_loader.h"
+auto& rl = ResourceLoader::getInstance();
+
+// Icon image widget
+lv_obj_t* ico = rl.makeIconImg(parent, RICON_SETTINGS);
+
+// Raw LVGL image descriptor (for lv_img_set_src)
+const lv_img_dsc_t* img = rl.icon(RICON_MUSIC);
+
+// System sound
+rl.sound("click");   // returns ion_sound_t*
+AudioDriver::getInstance().play(
+    (const uint8_t*)rl.sound("click")->data,
+    rl.sound("click")->len * 2);
+```
+
+### Color Constants
+
+```cpp
+// From config/ion_config.h
+ION_COLOR_BG         // 0x0A0E1A  Background
+ION_COLOR_SURFACE    // 0x131929  Card background
+ION_COLOR_SURFACE2   // 0x1A2236  Elevated surface
+ION_COLOR_ACCENT     // 0x00D4FF  Primary cyan
+ION_COLOR_ACCENT2    // 0x7B2FFF  Secondary purple
+ION_COLOR_SUCCESS    // 0x00FF9F  Green
+ION_COLOR_WARNING    // 0xFFB800  Amber
+ION_COLOR_ERROR      // 0xFF3366  Red
+ION_COLOR_TEXT       // 0xEEF2FF  Primary text
+ION_COLOR_TEXT_DIM   // 0x8899BB  Secondary text
+ION_COLOR_BORDER     // 0x1E2D4A  Card borders
+
+// Use with LVGL:
+lv_obj_set_style_bg_color(obj, lv_color_hex(ION_COLOR_SURFACE), 0);
+```
+
+### SDK Quick Macros
+
+```cpp
+#include "sdk/include/ion_sdk.h"
+
+ION_LOCK()                          // UIEngine::getInstance().lock(100)
+ION_UNLOCK()                        // UIEngine::getInstance().unlock()
+ION_NOTIFY("Title", "Msg", LEVEL)   // NotificationService::post(...)
+ION_SOUND("click")                  // AudioManager::playSystemSound(...)
+ION_ICON(RICON_SETTINGS)            // ResourceLoader::icon(...)
+```
+
+---
+
+## 13. SD Card Layout
 
 ```
 /sdcard/
-├── apps/
-│   └── MyApp/
-│       ├── manifest.json
-│       ├── app.bin
-│       └── icon.png
-│
-├── music/
-│
+├── music/          ← Music Player scans here (.wav .mp3 .flac)
 ├── roms/
-│   ├── gb/
-│   ├── gbc/
-│   └── gba/
-│
-├── data/
-│
-└── photos/
+│   ├── gb/         ← GameBoy ROMs (.gb)
+│   ├── gbc/        ← GameBoy Color ROMs (.gbc)
+│   └── gba/        ← GameBoy Advance ROMs (.gba) — beta
+├── apps/           ← External app manifests + binaries (future OTA)
+├── data/           ← App save data, configs
+└── photos/         ← Reserved for future camera app
+```
+
+All directories are created automatically on first mount if they don't exist.
+
+---
+
+## 14. Button Map
+
+```
+     ┌───────────────────────────────────────┐
+     │  UP (GPIO14)                           │
+     │  DN (GPIO15)                           │
+     │  LT (GPIO16)    [Display]              │
+     │  RT (GPIO17)                           │
+     │                             A (GPIO18) │
+     │  START (GPIO21)             B (GPIO19) │
+     │  MENU  (GPIO47)             X (GPIO20) │
+     └───────────────────────────────────────┘
+```
+
+| Button | GPIO | System Function | App Function |
+|--------|------|----------------|--------------|
+| UP | 14 | Navigate up | D-pad up |
+| DOWN | 15 | Navigate down | D-pad down |
+| LEFT | 16 | Previous/back | D-pad left |
+| RIGHT | 17 | Next/forward | D-pad right |
+| X | 20 | Confirm/select | Primary action |
+| B | 19 | Back/cancel | Secondary action |
+| A | 18 | Context action | Tertiary action |
+| START | 21 | Pause/resume | App-defined |
+| MENU | 47 | System menu | App-defined |
+| MENU (long) | 47 | Power off | — |
+
+---
+
+## 15. Pin Reference
+
+```
+ESP32-S3 ──────────────────── Peripheral
+GPIO  8  ── RST ──────────── ST7789V (Display)
+GPIO  9  ── DC  ──────────── ST7789V
+GPIO 10  ── CS  ──────────── ST7789V
+GPIO 11  ── MOSI ─────────── ST7789V / SPI2
+GPIO 12  ── SCLK ─────────── ST7789V / SPI2
+GPIO 13  ── BLK ──────────── ST7789V Backlight (LEDC)
+GPIO  4  ── BCK ──────────── PCM5102A (Audio)
+GPIO  5  ── LRCK ─────────── PCM5102A
+GPIO  6  ── DATA ─────────── PCM5102A
+GPIO 14  ── BTN_UP ────────── Button (active LOW)
+GPIO 15  ── BTN_DOWN ──────── Button
+GPIO 16  ── BTN_LEFT ──────── Button
+GPIO 17  ── BTN_RIGHT ─────── Button
+GPIO 18  ── BTN_A ─────────── Button
+GPIO 19  ── BTN_B ─────────── Button
+GPIO 20  ── BTN_X ─────────── Button
+GPIO 21  ── BTN_START ──────── Button
+GPIO 47  ── BTN_MENU ──────── Button
+GPIO 48  ── LED_DATA ─────── WS2812B (7 LEDs)
+GPIO 35  ── SD_MOSI ─────── SD Card / SPI3
+GPIO 36  ── SD_SCLK ─────── SD Card
+GPIO 37  ── SD_MISO ─────── SD Card
+GPIO 38  ── SD_CS ───────── SD Card
+GPIO  2  ── NRF_MOSI ─────── nRF24L01+ / SPI2
+GPIO  3  ── NRF_MISO ─────── nRF24L01+
+GPIO  7  ── NRF_SCLK ─────── nRF24L01+
+GPIO 39  ── NRF_CS ────────── nRF24L01+
+GPIO 40  ── NRF_CE ────────── nRF24L01+
+GPIO 41  ── NRF_IRQ ───────── nRF24L01+
+GPIO  1  ── BATT_ADC ──────── LiPo voltage divider → ADC1_CH0
+GPIO  0  ── CHG_STATUS ─────── TP4056 CHRG (LOW = charging)
 ```
 
 ---
 
-# ⚙️ Hardware Pinout
+## 16. Performance Tuning
 
-| Component | GPIO Pins |
-|------|------|
-| ST7789V Display | MOSI:11 SCLK:12 CS:10 DC:9 RST:8 BLK:13 |
-| SD Card | MOSI:35 MISO:37 SCLK:36 CS:38 |
-| PCM5102A | BCK:4 LRCK:5 DATA:6 |
-| WS2812B LEDs | DATA:48 |
-| nRF24L01+ | MOSI:2 MISO:3 SCLK:7 CS:39 CE:40 IRQ:41 |
-| Buttons | UP:14 DN:15 L:16 R:17 A:18 B:19 X:20 ST:21 MN:47 |
-| Battery ADC | GPIO1 |
+### Memory Budget
 
----
+| Region | Total | Typical Usage |
+|--------|-------|---------------|
+| Internal SRAM | ~512 KB | FreeRTOS tasks, I2S DMA, TCP/IP stack, LVGL heap |
+| PSRAM | 2 MB | LVGL draw buffers, GB core state, ROM data (max 1 MB) |
+| Flash | 8 MB | Firmware + embedded assets (~1.2 MB assets) |
 
-# 📖 Documentation
+### LVGL Optimization
 
-Full developer documentation can be found in
-
-```
-docs/README.md
+```c
+// In lv_conf.h — already configured:
+LV_MEM_CUSTOM_ALLOC  → heap_caps_malloc(s, MALLOC_CAP_SPIRAM) // Keeps SRAM free
+LV_COLOR_16_SWAP = 1                                            // No CPU byte-swap
+LV_USE_GPU_ESP32S3_PPA = 1                                      // Hardware blend
 ```
 
----
+**Double-buffer DMA** means the CPU renders into Buffer A while the DMA is transmitting Buffer B — zero CPU stall during display transfer.
 
-# 🤝 Contributing
+### Task Stack Sizing
 
-1. Fork the repository  
-2. Create a feature branch  
-3. Commit your changes  
-4. Submit a Pull Request
+```
+ion_ui:     8192  ← LVGL widget trees are stack-hungry; don't reduce
+ion_audio:  4096  ← Must hold I2S DMA descriptors + WAV read buffer
+ion_events: 4096  ← Callbacks can allocate; keep generous
+ion_apps:   16384 ← Your app tasks should use this as minimum
+```
 
----
+### Power Consumption
 
-# 📜 License
+| State | Current |
+|-------|---------|
+| Full active (WiFi tx, audio, LEDs, display 100%) | ~280 mA |
+| Normal use (display 80%, no WiFi, LEDs off) | ~90 mA |
+| Auto-dim (idle 60s, display 20%) | ~45 mA |
+| Deep sleep | ~12 µA |
 
-Licensed under the **Apache License 2.0**
-
-You are free to:
-
-• Use commercially  
-• Modify the source  
-• Distribute the software  
-
-You must include the license and state significant changes.
-
-See the `LICENSE` file for full details.
+On a 1000 mAh LiPo: ~4h normal use, >80h deep sleep standby.
 
 ---
 
-# 👨‍💻 Author
+## 17. Troubleshooting
 
-**Aosmic Studio**
+### Build Errors
 
-Embedded Systems • Firmware • Hardware Innovation
+**`lv_conf.h: No such file`**
+```bash
+# Ensure CONFIG in sdkconfig matches:
+CONFIG_LV_CONF_INCLUDE_SIMPLE=y
+# Or add to CMakeLists.txt:
+target_compile_definitions(${COMPONENT_LIB} PUBLIC LV_CONF_INCLUDE_SIMPLE=1)
+```
+
+**`undefined reference to ion_icons`**
+```bash
+# Assets not generated. Run:
+python3 tools/gen_assets.py
+```
+
+**`esp_i2s.h: I2S_CHANNEL_DEFAULT_CONFIG undeclared`**
+```
+IDF version must be ≥5.0 for the I2S v2 API.
+Run: idf.py --version  (must be 5.0+)
+```
+
+### Runtime Issues
+
+**Blank display / no backlight**
+```
+1. Check SPI2 MOSI/SCLK/CS/DC/RST wiring matches pin_config.h
+2. Verify 3.3V supply to ST7789V (min 120 mA peak)
+3. In monitor: look for "ST7789 Init OK" log
+4. Try reducing SPI speed: DISPLAY_SPI_HZ → 20000000
+```
+
+**No audio / silent PCM5102A**
+```
+1. PCM5102A needs BCK/LRCK/DATA connected correctly
+2. FLT, DEMP, XSMT pins: FLT=GND, DEMP=GND, XSMT=3.3V (unmute)
+3. Check I2S0 init log: "PCM5102A Init I2S 44100Hz stereo 16-bit"
+4. Verify volume > 0: AudioManager::getInstance().setVolume(80)
+```
+
+**WS2812B LEDs not lighting**
+```
+1. Requires 5V supply — 3.3V data signal is fine for most WS2812B
+2. Add 300–500 Ω resistor on DATA line
+3. Add 100 µF capacitor between LED VCC and GND
+4. Check RMT peripheral init: "WS2812 7 LEDs @ GPIO48"
+```
+
+**SD card not mounting**
+```
+1. Format as FAT32 (not exFAT) with 32 KB allocation unit
+2. Check SPI3 wiring — SD uses different SPI bus from display
+3. Reduce SPI speed: edit sd_driver.cpp SDSPI_HOST_DEFAULT
+4. Some SD cards need 100ms power-up delay; add vTaskDelay(pdMS_TO_TICKS(200)) before init
+```
+
+**PSRAM not initializing**
+```
+Ensure sdkconfig.defaults is applied:
+  CONFIG_SPIRAM=y
+  CONFIG_SPIRAM_MODE_OCT=y   (for ESP32-S3 with OPI PSRAM)
+  CONFIG_SPIRAM_SPEED_80M=y
+Run: idf.py menuconfig → Component config → ESP PSRAM
+```
+
+**WiFi disconnects repeatedly**
+```
+1. Check antenna — ESP32-S3-DevKit has PCB antenna, keep clear of metal
+2. Reduce TX power: esp_wifi_set_max_tx_power(50) (about 12.5 dBm)
+3. Enable modem sleep: esp_wifi_set_ps(WIFI_PS_MIN_MODEM)
+```
+
+**OOM / Heap exhausted**
+```
+1. Run: IonKernel::getInstance().printMemStats() to see current usage
+2. Move large buffers to PSRAM: heap_caps_malloc(size, MALLOC_CAP_SPIRAM)
+3. Reduce LVGL buffer lines: BUF_LINES 60 → 40 in st7789_driver.h
+4. Disable unused LVGL widgets in lv_conf.h
+```
+
+**Display tearing / artifacts**
+```
+Double-buffering should prevent tearing. If you see it:
+1. Ensure lv_disp_draw_buf_init() is called with TWO buffers
+2. Check flushReadyCb is being called: it calls lv_disp_flush_ready()
+3. Try full_refresh=1 in the LVGL driver (slower but no tearing)
+```
+
+---
+
+---
+
+## 19. Publishing Apps for IonOS
+
+### Package Format (.ionapp)
+
+An `.ionapp` is a simple binary file:
+
+```
+[256 bytes] Header    magic, version, ID, name, author, desc, CRC32
+[2048 bytes] Icon     32×32 pixels, RGB565 byte-swapped (SPI display format)
+[N bytes]   Code      Your compiled app binary (ESP32-S3 ELF/flat binary)
+```
+
+### Creating a Package
+
+```bash
+# Install deps
+pip install Pillow
+
+# Generate example project scaffold
+python3 tools/create_ionapp.py --example --output my_app/
+
+# After writing your app and compiling it:
+python3 tools/create_ionapp.py \
+    --manifest my_app/manifest.json \
+    --code build/my_app.bin \
+    --icon my_app/icon.png \
+    --output MyApp.ionapp
+
+# Inspect any .ionapp file (validate + show metadata)
+python3 tools/create_ionapp.py --inspect MyApp.ionapp
+```
+
+### manifest.json
+
+```json
+{
+  "id":         "com.yourname.myapp",
+  "name":       "My App",
+  "version":    "1.0.0",
+  "author":     "Your Name",
+  "desc":       "What your app does in one sentence.",
+  "icon_color": 16744192,
+  "min_ionos":  "1.0.0",
+  "perms":      ["audio", "led"]
+}
+```
+
+| Field | Required | Max | Notes |
+|-------|----------|-----|-------|
+| `id` | ✓ | 63 chars | Reverse domain: `com.example.app` |
+| `name` | ✓ | 23 chars | Shown on home screen |
+| `version` | ✓ | 11 chars | Semver: `1.2.3` |
+| `author` | | 31 chars | |
+| `desc` | | 127 chars | Shown in App Store detail screen |
+| `icon_color` | | | RGB accent integer (e.g. `0xFF6B35 = 16740149`) |
+| `min_ionos` | | | Minimum IonOS version |
+| `perms` | | | `wifi`, `sd`, `audio`, `led`, `radio` |
+
+### Permissions
+
+IonOS shows a **permissions card** before installation whenever an app requests sensitive access:
+
+| Permission | Flag | Access |
+|------------|------|--------|
+| `wifi` | 0x01 | Network (HTTP requests) |
+| `sd` | 0x02 | SD card read/write |
+| `audio` | 0x04 | Play sounds |
+| `led` | 0x08 | Control RGB LEDs |
+| `radio` | 0x10 | nRF24L01+ wireless |
+
+### Installing on Device
+
+1. Copy `MyApp.ionapp` to `/sdcard/apps/` on the microSD card
+2. Insert SD card into IonOS device
+3. Open **App Store** from the home screen
+4. Tap **Available** tab — your package appears
+5. Tap the card → review permissions → **Install App**
+6. Watch the animated progress bar (validate → extract icon → extract code → register)
+7. App appears on the home screen immediately
+
+### Update Flow
+
+- Drop a newer `.ionapp` (higher version in manifest) into `/sdcard/apps/`
+- App Store **Available** tab shows an amber **Update** badge
+- Tap → **Update App** → old version is removed first, new version installs
+- App data in `/sdcard/installed/<name>/data/` is preserved across updates
+
+### Uninstalling
+
+- Open **App Store** → **Library** tab
+- Tap the installed app → scroll down → **Uninstall**
+- Removes `/sdcard/installed/<name>/` recursively
+- App disappears from home screen immediately
+
+
+## 19. Contributing
+
+### Code Style
+
+- C++17, ESP-IDF idioms
+- Singletons for hardware drivers and services
+- `getInstance()` pattern everywhere
+- No `new` in interrupt context, no `malloc` in hot paths
+- PSRAM for all buffers >4 KB
+- `IRAM_ATTR` on ISR callbacks
+- Log tags match class name: `static const char* TAG = "DriverName";`
+
+### Adding a New Driver
+
+1. Create `main/drivers/mydevice/mydevice_driver.h/.cpp`
+2. Implement `getInstance()` singleton
+3. Add `init()` → call from `IonKernel::phaseHardware()`
+4. Add `.cpp` to `main/CMakeLists.txt` SRCS
+5. Add REQUIRES if new IDF component needed
+
+### Adding a New App
+
+1. Create `main/apps/myapp/myapp.h/.cpp`
+2. Inherit from `IonApp`, implement lifecycle methods
+3. Register in `AppManager::init()` with icon, color, factory lambda
+4. Add icon to `tools/gen_assets.py` ICONS list if needed
+5. Add `.cpp` to `main/CMakeLists.txt` SRCS
+
+### Adding a New Event Type
+
+1. Add to `ion_event_type_t` enum in `main/config/ion_config.h`
+2. Post with `IonKernel::getInstance().postEvent(MY_NEW_EVENT, data)`
+3. Subscribe in any component
+
+---
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Built with ❤️ on ESP-IDF + FreeRTOS + LVGL v8.
