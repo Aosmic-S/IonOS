@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>IonOS — Full Wiring Diagram</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { background:#040b04; }
+body { display:flex; flex-direction:column; align-items:center; padding:12px; font-family:'Courier New',monospace; }
+h1 { color:#00ff9f; font-size:.9rem; letter-spacing:4px; text-transform:uppercase; margin-bottom:4px; }
+p  { color:#2a5a2a; font-size:.65rem; letter-spacing:2px; margin-bottom:8px; }
+canvas { display:block; max-width:100%; border:1px solid #0d2a0d; border-radius:4px; cursor:crosshair; }
+#info { color:#2a5a2a; font-size:.6rem; margin-top:6px; }
+</style>
+</head>
+<body>
+<h1>IonOS · ESP32-S3 · Full Wiring Diagram</h1>
+<p>ST7789V 320×240 · PCM5102A · WS2812B×7 · nRF24L01+ · SD Card · 9 Buttons · LiPo</p>
+<canvas id="cv"></canvas>
+<div id="info">Scroll / zoom with browser. All signal levels 3.3 V unless noted.</div>
+<script>
+// ── roundRect polyfill ─────────────────────────────────────────────────────
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){
+    r = Math.min(r, w/2, h/2);
+    this.moveTo(x+r,y);
+    this.lineTo(x+w-r,y);  this.arcTo(x+w,y,   x+w,y+r,   r);
+    this.lineTo(x+w,y+h-r);this.arcTo(x+w,y+h, x+w-r,y+h, r);
+    this.lineTo(x+r,y+h);  this.arcTo(x,y+h,   x,y+h-r,   r);
+    this.lineTo(x,y+r);    this.arcTo(x,y,     x+r,y,     r);
+    this.closePath();
+  };
+}
+
+// ── Canvas setup ────────────────────────────────────────────────────────────
+const CW = 1500, CH = 1040;
+const cv = document.getElementById('cv');
+cv.width = CW; cv.height = CH;
+const g = cv.getContext('2d');
+
+// ── Palette ─────────────────────────────────────────────────────────────────
+const P = {
+  bg:'#060e06', grid:'#0b1b0b', chip:'#0c160c', chipBdr:'#1e4a1e',
+  comp:'#0c180c', compBdr:'#1e3a1e',
+  lcd:'#00d4ff',  // cyan
+  i2s:'#ff9f00',  // amber
+  led:'#bf44ff',  // purple
+  btn:'#00ff9f',  // green
+  sd :'#ffe033',  // yellow
+  nrf:'#ff4466',  // red
+  pwr:'#ff6b35',  // orange
+  gnd:'#3a7a4a',  // muted green
+  adc:'#aaaaaa',  // grey
+  txt:'#99cc99', dim:'#2a5a2a', hi:'#ccffcc',
+};
+function busCol(bus) {
+  return ({lcd:P.lcd,i2s:P.i2s,led:P.led,btn:P.btn,
+           sd:P.sd,nrf:P.nrf,pwr:P.pwr,gnd:P.gnd,adc:P.adc})[bus] || '#888';
+}
+
+// ── Drawing helpers ──────────────────────────────────────────────────────────
+function box(x,y,w,h,fill,stroke,r,lw){
+  g.beginPath(); g.roundRect(x,y,w,h,r||5);
+  if(fill)  { g.fillStyle=fill;   g.fill(); }
+  if(stroke){ g.strokeStyle=stroke; g.lineWidth=lw||1; g.stroke(); }
+}
+function label(t,x,y,col,sz,align,bold){
+  g.fillStyle=col; g.textAlign=align||'left'; g.textBaseline='middle';
+  g.font=(bold?'bold ':'')+sz+'px "Courier New",monospace';
+  g.fillText(t,x,y);
+}
+function dot(x,y,col,r){
+  g.beginPath(); g.arc(x,y,r||3,0,Math.PI*2);
+  g.fillStyle=col; g.fill();
+}
+function line(pts,col,lw,dash){
+  g.beginPath(); g.moveTo(pts[0][0],pts[0][1]);
+  for(let i=1;i<pts.length;i++) g.lineTo(pts[i][0],pts[i][1]);
+  g.strokeStyle=col; g.lineWidth=lw||1.6;
+  g.lineCap='round'; g.lineJoin='round';
+  g.setLineDash(dash||[]); g.stroke(); g.setLineDash([]);
+}
+function glow(col,blur){ g.shadowColor=col; g.shadowBlur=blur||8; }
+function noGlow(){ g.shadowBlur=0; }
+
+// Wire with endpoint dots
+function wire(pts,col,lw,dash){
+  line(pts,col,lw,dash);
+  dot(pts[0][0],pts[0][1],col,2.5);
+  dot(pts[pts.length-1][0],pts[pts.length-1][1],col,2.5);
+}
+
+// ── Background ───────────────────────────────────────────────────────────────
+g.fillStyle=P.bg; g.fillRect(0,0,CW,CH);
+for(let x=20;x<CW;x+=20) for(let y=20;y<CH;y+=20){
+  g.fillStyle=P.grid; g.beginPath(); g.arc(x,y,0.6,0,Math.PI*2); g.fill();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ESP32-S3 CHIP  (centre column)
+// ═══════════════════════════════════════════════════════════════════════════
+const EX=564, EY=72, EW=232, EH=870;
+glow(P.chipBdr,14);
+box(EX,EY,EW,EH,P.chip,P.chipBdr,8,1.5);
+noGlow();
+box(EX+5,EY+5,EW-10,EH-10,null,'#162816',6,0.5);
+
+label('ESP32-S3', EX+EW/2, EY+20, P.hi, 12, 'center', true);
+label('Xtensa LX7 · 240 MHz', EX+EW/2, EY+36, P.dim, 7.5, 'center');
+label('2 MB PSRAM · 8 MB Flash', EX+EW/2, EY+50, P.dim, 7.5, 'center');
+label('Dual Core · WiFi · BT5.0', EX+EW/2, EY+64, P.dim, 7, 'center');
+
+// ── Left-side GPIO pins ──────────────────────────────────────────────────────
+//   24 pins starting at y=104, pitch=34
+const LP_PINS = [
+  {id:'GPIO0',  fn:'CHG_STATUS', bus:'adc'},
+  {id:'GPIO1',  fn:'BATT_ADC',   bus:'adc'},
+  {id:'GPIO2',  fn:'NRF_MOSI',   bus:'nrf'},
+  {id:'GPIO3',  fn:'NRF_MISO',   bus:'nrf'},
+  {id:'GPIO4',  fn:'I2S_BCK',    bus:'i2s'},
+  {id:'GPIO5',  fn:'I2S_LRCK',   bus:'i2s'},
+  {id:'GPIO6',  fn:'I2S_DATA',   bus:'i2s'},
+  {id:'GPIO7',  fn:'NRF_SCLK',   bus:'nrf'},
+  {id:'GPIO8',  fn:'LCD_RST',    bus:'lcd'},
+  {id:'GPIO9',  fn:'LCD_DC',     bus:'lcd'},
+  {id:'GPIO10', fn:'LCD_CS',     bus:'lcd'},
+  {id:'GPIO11', fn:'LCD_MOSI',   bus:'lcd'},
+  {id:'GPIO12', fn:'LCD_SCLK',   bus:'lcd'},
+  {id:'GPIO13', fn:'LCD_BLK',    bus:'lcd'},
+  {id:'GPIO14', fn:'BTN_UP',     bus:'btn'},
+  {id:'GPIO15', fn:'BTN_DOWN',   bus:'btn'},
+  {id:'GPIO16', fn:'BTN_LEFT',   bus:'btn'},
+  {id:'GPIO17', fn:'BTN_RIGHT',  bus:'btn'},
+  {id:'GPIO18', fn:'BTN_A',      bus:'btn'},
+  {id:'GPIO19', fn:'BTN_B',      bus:'btn'},
+  {id:'GPIO20', fn:'BTN_X ★',   bus:'btn'},
+  {id:'GPIO21', fn:'BTN_START',  bus:'btn'},
+  {id:'3V3',    fn:'POWER 3.3V', bus:'pwr'},
+  {id:'GND',    fn:'GROUND',     bus:'gnd'},
+];
+const LPS = 104, LPP = 34;   // start y, pitch
+function lpy(i){ return LPS + i*LPP; }
+const LP_X = EX;              // stub tip at left edge of chip
+
+LP_PINS.forEach((p,i) => {
+  const y = lpy(i), col = busCol(p.bus);
+  const stub = LP_X - 14;
+  line([[LP_X, y], [stub, y]], col, 1.5);
+  dot(stub, y, col, 2.5);
+  label(p.id, LP_X - 18, y, col, 7.5, 'right');
+  label(p.fn, LP_X + 4,  y, '#1e4a2a', 7, 'left');
+});
+
+// ── Right-side GPIO pins ─────────────────────────────────────────────────────
+//   12 pins, pitch=68
+const RP_PINS = [
+  {id:'3V3',    fn:'POWER 3.3V', bus:'pwr'},
+  {id:'GND',    fn:'GROUND',     bus:'gnd'},
+  {id:'GPIO35', fn:'SD_MOSI',    bus:'sd'},
+  {id:'GPIO36', fn:'SD_SCLK',    bus:'sd'},
+  {id:'GPIO37', fn:'SD_MISO',    bus:'sd'},
+  {id:'GPIO38', fn:'SD_CS',      bus:'sd'},
+  {id:'GPIO39', fn:'NRF_CSN',    bus:'nrf'},
+  {id:'GPIO40', fn:'NRF_CE',     bus:'nrf'},
+  {id:'GPIO41', fn:'NRF_IRQ',    bus:'nrf'},
+  {id:'GPIO47', fn:'BTN_MENU',   bus:'btn'},
+  {id:'GPIO48', fn:'LED_DATA',   bus:'led'},
+  {id:'GND',    fn:'GROUND',     bus:'gnd'},
+];
+const RPS = 104, RPP = 68;
+function rpy(i){ return RPS + i*RPP; }
+const RP_X = EX + EW;
+
+RP_PINS.forEach((p,i) => {
+  const y = rpy(i), col = busCol(p.bus);
+  const stub = RP_X + 14;
+  line([[RP_X, y], [stub, y]], col, 1.5);
+  dot(stub, y, col, 2.5);
+  label(p.id, RP_X + 18, y, col, 7.5, 'left');
+  label(p.fn, RP_X - 4,  y, '#1e4a2a', 7, 'right');
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPONENT helper — returns array of pin connector points
+// ═══════════════════════════════════════════════════════════════════════════
+function drawComp(x, y, w, h, title, subtitle, pins, connSide, accentBus) {
+  const ac = busCol(accentBus);
+  glow(ac, 6);
+  box(x, y, w, h, P.comp, ac, 6, 1);
+  noGlow();
+  label(title, x+w/2, y+16, P.hi, 10, 'center', true);
+  if(subtitle) label(subtitle, x+w/2, y+30, P.dim, 7, 'center');
+
+  const yStart = subtitle ? y+44 : y+32;
+  const spacing = (h - (subtitle ? 50 : 38)) / Math.max(pins.length - 1, 1);
+
+  return pins.map((p, i) => {
+    const py  = yStart + i * spacing;
+    const px  = (connSide === 'right') ? x+w : x;
+    const col = busCol(p.bus);
+    dot(px, py, col, 2.5);
+    const lx  = (connSide === 'right') ? x+8 : x+w-8;
+    const al  = (connSide === 'right') ? 'left' : 'right';
+    label(p.n, lx, py, col, 7.5, al);
+    if(p.note) {
+      const nx = (connSide === 'right') ? x+w-4 : x+4;
+      const na = (connSide === 'right') ? 'right' : 'left';
+      label(p.note, nx, py, '#2a5a3a', 6.5, na);
+    }
+    return {x:px, y:py, col, bus:p.bus};
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ST7789V DISPLAY  (left column, top)
+// ═══════════════════════════════════════════════════════════════════════════
+const LCD_X=28, LCD_Y=72, LCD_W=210, LCD_H=346;
+const lcdP = drawComp(LCD_X, LCD_Y, LCD_W, LCD_H,
+  'ST7789V', '320×240 IPS · SPI2 · 40MHz',
+  [
+    {n:'VCC', bus:'pwr', note:'3.3V'},
+    {n:'GND', bus:'gnd'},
+    {n:'SCL', bus:'lcd', note:'SCLK'},
+    {n:'SDA', bus:'lcd', note:'MOSI'},
+    {n:'RES', bus:'lcd', note:'RST'},
+    {n:'DC',  bus:'lcd'},
+    {n:'CS',  bus:'lcd'},
+    {n:'BLK', bus:'lcd', note:'PWM'},
+  ], 'right', 'lcd');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PCM5102A  (left column, middle)
+// ═══════════════════════════════════════════════════════════════════════════
+const PCM_X=28, PCM_Y=456, PCM_W=210, PCM_H=250;
+const pcmP = drawComp(PCM_X, PCM_Y, PCM_W, PCM_H,
+  'PCM5102A', 'I²S DAC · 44.1kHz Stereo',
+  [
+    {n:'VDD',  bus:'pwr', note:'3.3V'},
+    {n:'GND',  bus:'gnd'},
+    {n:'BCK',  bus:'i2s'},
+    {n:'LRCK', bus:'i2s'},
+    {n:'DIN',  bus:'i2s'},
+    {n:'XSMT', bus:'pwr', note:'→3.3V'},
+    {n:'FLT',  bus:'gnd', note:'→GND'},
+    {n:'DEMP', bus:'gnd', note:'→GND'},
+  ], 'right', 'i2s');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Battery / TP4056  (left column, bottom)
+// ═══════════════════════════════════════════════════════════════════════════
+const BAT_X=28, BAT_Y=752, BAT_W=210, BAT_H=218;
+const batP = drawComp(BAT_X, BAT_Y, BAT_W, BAT_H,
+  'LiPo + TP4056', 'Charger + 3.3V LDO',
+  [
+    {n:'USB-IN', bus:'pwr'},
+    {n:'GND',    bus:'gnd'},
+    {n:'BATT+',  bus:'pwr', note:'LiPo+'},
+    {n:'CHRG',   bus:'adc', note:'LOW=chg'},
+    {n:'VCC OUT',bus:'pwr', note:'→3.3V'},
+    {n:'R-DIV',  bus:'adc', note:'100K÷100K'},
+  ], 'right', 'pwr');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// microSD  (right column, top)
+// ═══════════════════════════════════════════════════════════════════════════
+const SD_X=1062, SD_Y=72, SD_W=210, SD_H=280;
+const sdP = drawComp(SD_X, SD_Y, SD_W, SD_H,
+  'microSD Card', 'SPI3 · FAT32',
+  [
+    {n:'VCC',  bus:'pwr', note:'3.3V'},
+    {n:'GND',  bus:'gnd'},
+    {n:'MOSI', bus:'sd'},
+    {n:'SCK',  bus:'sd'},
+    {n:'MISO', bus:'sd', note:'10KΩ↑'},
+    {n:'CS',   bus:'sd'},
+  ], 'left', 'sd');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// nRF24L01+  (right column, middle)
+// ═══════════════════════════════════════════════════════════════════════════
+const NRF_X=1062, NRF_Y=398, NRF_W=210, NRF_H=330;
+const nrfP = drawComp(NRF_X, NRF_Y, NRF_W, NRF_H,
+  'nRF24L01+', '2.4GHz · Ch 76 · 32B payload',
+  [
+    {n:'GND',  bus:'gnd'},
+    {n:'VCC',  bus:'pwr', note:'100µF!'},
+    {n:'CE',   bus:'nrf'},
+    {n:'CSN',  bus:'nrf'},
+    {n:'SCK',  bus:'nrf', note:'long↓'},
+    {n:'MOSI', bus:'nrf', note:'long↓'},
+    {n:'MISO', bus:'nrf', note:'long↓'},
+    {n:'IRQ',  bus:'nrf'},
+  ], 'left', 'nrf');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WS2812B LEDs  (right column, bottom)
+// ═══════════════════════════════════════════════════════════════════════════
+const LED_X=1062, LED_Y=782, LED_W=210, LED_H=188;
+const ledP = drawComp(LED_X, LED_Y, LED_W, LED_H,
+  'WS2812B × 7', 'RGB LED Chain · RMT',
+  [
+    {n:'5V',   bus:'pwr', note:'ext 5V supply'},
+    {n:'GND',  bus:'gnd'},
+    {n:'DIN',  bus:'led', note:'300Ω series'},
+    {n:'DOUT', bus:'led', note:'→LED 2…7'},
+  ], 'left', 'led');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BUTTONS  (top row)
+// ═══════════════════════════════════════════════════════════════════════════
+const BTNS_DEF = [
+  {l:'↑ UP',    g:'GPIO14', x:28,  lpi:14, side:'L'},
+  {l:'↓ DOWN',  g:'GPIO15', x:92,  lpi:15, side:'L'},
+  {l:'← LEFT',  g:'GPIO16', x:156, lpi:16, side:'L'},
+  {l:'→ RIGHT', g:'GPIO17', x:220, lpi:17, side:'L'},
+  {l:'★ X',     g:'GPIO20', x:294, lpi:20, side:'L', hi:true},
+  {l:'A',       g:'GPIO18', x:364, lpi:18, side:'L'},
+  {l:'B',       g:'GPIO19', x:428, lpi:19, side:'L'},
+  {l:'START',   g:'GPIO21', x:492, lpi:21, side:'L'},
+  {l:'MENU',    g:'GPIO47', x:888, lpi:9,  side:'R'},
+];
+const BW=58, BH=56;
+BTNS_DEF.forEach(b => {
+  const col = b.hi ? P.btn : '#3a7a3a';
+  const bg  = b.hi ? '#091e0e' : '#0a170a';
+  const bdr = b.hi ? P.btn    : '#1a3a1a';
+  if(b.hi) glow(P.btn, 10);
+  box(b.x, 4, BW, BH, bg, bdr, 5, b.hi?1.5:1);
+  noGlow();
+  label(b.l,  b.x+BW/2, 4+14, b.hi?P.btn:col,  b.hi?10:9, 'center', b.hi);
+  label(b.g,  b.x+BW/2, 4+27, '#2a5a2a', 6.5, 'center');
+  label('→GND', b.x+BW/2, 4+42, '#1a3a1a', 6, 'center');
+  dot(b.x+BW/2, 4+BH, b.hi?P.btn:col, 2.5);
+});
+// Active-LOW note
+label('All 9 buttons: active LOW — one pin → GPIO, other pin → GND.  Internal pull-ups enabled in firmware.',
+  28, 4+BH+14, '#2a5a2a', 7);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ROUTING  (left spine x=448, right spine x=862)
+// ═══════════════════════════════════════════════════════════════════════════
+const LS = 448;   // left routing spine x
+const RS = 862;   // right routing spine x
+
+// ── ST7789V → Left-side GPIOs ────────────────────────────────────────────
+// lcdP: [VCC,GND,SCL,SDA,RES,DC,CS,BLK]  connector x=238
+// SCL  → GPIO12 lpi=12   SDA → GPIO11 lpi=11
+// RES  → GPIO8  lpi=8    DC  → GPIO9  lpi=9
+// CS   → GPIO10 lpi=10   BLK → GPIO13 lpi=13
+const lcW=[
+  [lcdP[2], 12, 2],  // SCL → GPIO12
+  [lcdP[3], 11, 4],  // SDA → GPIO11
+  [lcdP[4],  8, 6],  // RES → GPIO8
+  [lcdP[5],  9, 8],  // DC  → GPIO9
+  [lcdP[6], 10, 10], // CS  → GPIO10
+  [lcdP[7], 13, 12], // BLK → GPIO13
+];
+lcW.forEach(([p, lpi, off]) => {
+  const sx = LS + off, ty = lpy(lpi);
+  wire([[p.x,p.y],[sx,p.y],[sx,ty],[LP_X-14,ty]], P.lcd);
+});
+// VCC/GND power (dashed)
+line([[lcdP[0].x,lcdP[0].y],[LS-8,lcdP[0].y],[LS-8,lpy(22)],[LP_X-14,lpy(22)]], P.pwr,1.2,[5,3]);
+line([[lcdP[1].x,lcdP[1].y],[LS-16,lcdP[1].y],[LS-16,lpy(23)],[LP_X-14,lpy(23)]], P.gnd,1.2,[5,3]);
+
+// ── PCM5102A → Left-side GPIOs ───────────────────────────────────────────
+// pcmP: [VDD,GND,BCK,LRCK,DIN,XSMT,FLT,DEMP]
+// BCK → GPIO4 lpi=4   LRCK → GPIO5 lpi=5   DIN → GPIO6 lpi=6
+const i2sW=[
+  [pcmP[2], 4, 30],
+  [pcmP[3], 5, 36],
+  [pcmP[4], 6, 42],
+];
+i2sW.forEach(([p, lpi, off]) => {
+  const sx = LS + off, ty = lpy(lpi);
+  wire([[p.x,p.y],[sx,p.y],[sx,ty],[LP_X-14,ty]], P.i2s);
+});
+line([[pcmP[0].x,pcmP[0].y],[LS-6,pcmP[0].y],[LS-6,lpy(22)],[LP_X-14,lpy(22)]], P.pwr,1.2,[5,3]);
+line([[pcmP[1].x,pcmP[1].y],[LS-14,pcmP[1].y],[LS-14,lpy(23)],[LP_X-14,lpy(23)]], P.gnd,1.2,[5,3]);
+
+// ── Battery → GPIO0, GPIO1 ───────────────────────────────────────────────
+// batP: [USB-IN,GND,BATT+,CHRG,VCC OUT,R-DIV]
+// CHRG → GPIO0 lpi=0    R-DIV → GPIO1 lpi=1
+wire([[batP[3].x,batP[3].y],[LS-24,batP[3].y],[LS-24,lpy(0)],[LP_X-14,lpy(0)]], P.adc);
+wire([[batP[5].x,batP[5].y],[LS-30,batP[5].y],[LS-30,lpy(1)],[LP_X-14,lpy(1)]], P.adc);
+line([[batP[4].x,batP[4].y],[LS-4,batP[4].y],[LS-4,lpy(22)],[LP_X-14,lpy(22)]], P.pwr,1.2,[5,3]);
+
+// ── SD Card → Right-side GPIOs ───────────────────────────────────────────
+// sdP: [VCC,GND,MOSI,SCK,MISO,CS]  connector x=1062
+// MOSI→GPIO35 rpi=2  SCK→GPIO36 rpi=3  MISO→GPIO37 rpi=4  CS→GPIO38 rpi=5
+const sdW=[
+  [sdP[2], 2, -4],
+  [sdP[3], 3, -10],
+  [sdP[4], 4, -16],
+  [sdP[5], 5, -22],
+];
+sdW.forEach(([p, rpi, off]) => {
+  const sx = RS + off, ty = rpy(rpi);
+  wire([[p.x,p.y],[sx,p.y],[sx,ty],[RP_X+14,ty]], P.sd);
+});
+line([[sdP[0].x,sdP[0].y],[RS+8,sdP[0].y],[RS+8,rpy(0)],[RP_X+14,rpy(0)]], P.pwr,1.2,[5,3]);
+line([[sdP[1].x,sdP[1].y],[RS+16,sdP[1].y],[RS+16,rpy(1)],[RP_X+14,rpy(1)]], P.gnd,1.2,[5,3]);
+
+// ── nRF24 CE/CSN/IRQ → Right-side GPIOs ─────────────────────────────────
+// nrfP: [GND,VCC,CE,CSN,SCK,MOSI,MISO,IRQ]  connector x=1062
+// CE→GPIO40 rpi=7   CSN→GPIO39 rpi=6   IRQ→GPIO41 rpi=8
+wire([[nrfP[2].x,nrfP[2].y],[RS-28,nrfP[2].y],[RS-28,rpy(7)],[RP_X+14,rpy(7)]], P.nrf); // CE→40
+wire([[nrfP[3].x,nrfP[3].y],[RS-34,nrfP[3].y],[RS-34,rpy(6)],[RP_X+14,rpy(6)]], P.nrf); // CSN→39
+wire([[nrfP[7].x,nrfP[7].y],[RS-40,nrfP[7].y],[RS-40,rpy(8)],[RP_X+14,rpy(8)]], P.nrf); // IRQ→41
+line([[nrfP[1].x,nrfP[1].y],[RS+10,nrfP[1].y],[RS+10,rpy(0)],[RP_X+14,rpy(0)]], P.pwr,1.2,[5,3]);
+line([[nrfP[0].x,nrfP[0].y],[RS+18,nrfP[0].y],[RS+18,rpy(1)],[RP_X+14,rpy(1)]], P.gnd,1.2,[5,3]);
+
+// ── nRF24 SPI (SCK/MOSI/MISO) cross-chip routing ────────────────────────
+// GPIO2,3,7 are on LEFT side; nRF24 is on RIGHT — route under the chip.
+// Use y = EY+EH+28, +44, +60
+const CY_BASE = EY + EH + 30;
+const [CY1, CY2, CY3] = [CY_BASE, CY_BASE+18, CY_BASE+36];
+// nrfP[4]=SCK→GPIO7 lpi=7   nrfP[5]=MOSI→GPIO2 lpi=2   nrfP[6]=MISO→GPIO3 lpi=3
+const nrfCross=[
+  [nrfP[4], lpy(7), CY1, P.nrf, 'SCK → GPIO7'],
+  [nrfP[5], lpy(2), CY2, P.nrf, 'MOSI → GPIO2'],
+  [nrfP[6], lpy(3), CY3, P.nrf, 'MISO → GPIO3'],
+];
+nrfCross.forEach(([p, lpiY, cy, col]) => {
+  const RX = NRF_X + NRF_W + 28;  // right side of nRF24 box
+  const LX = 28;                   // far left
+  line([[p.x,p.y],[RX,p.y],[RX,cy],[LX,cy],[LX,lpiY],[LP_X-14,lpiY]], col, 1.4, [4,3]);
+  dot(p.x,p.y,col,2.5); dot(LP_X-14,lpiY,col,2.5);
+});
+// Label the cross-routing zone
+box(24, CY_BASE-10, CW-48, CY3-CY_BASE+26, null, '#1a0a0a', 3, 0.5);
+label('nRF24 SPI cross-routing (GPIO 2,3,7 on left; nRF24 on right — routes below chip)',
+  CW/2, CY_BASE+13, '#3a1a1a', 7, 'center');
+
+// ── WS2812B → GPIO48 ────────────────────────────────────────────────────
+// ledP: [5V,GND,DIN,DOUT]   GPIO48 rpi=10
+wire([[RP_X+14,rpy(10)],[RS+24,rpy(10)],[RS+24,ledP[2].y],[ledP[2].x,ledP[2].y]], P.led);
+line([[ledP[0].x,ledP[0].y],[RS+28,ledP[0].y]], P.pwr, 1.2, [5,3]); // 5V
+line([[ledP[1].x,ledP[1].y],[RS+20,ledP[1].y],[RS+20,rpy(11)],[RP_X+14,rpy(11)]], P.gnd, 1.2, [5,3]);
+
+// ── Buttons → GPIOs ─────────────────────────────────────────────────────
+BTNS_DEF.forEach(b => {
+  const bx = b.x + BW/2;
+  const by = 4 + BH;
+  const col = b.hi ? P.btn : '#2a7a2a';
+  if(b.side === 'L'){
+    const ty = lpy(b.lpi);
+    line([[bx,by],[bx,ty],[LP_X-14,ty]], col, 1.3);
+    dot(bx,by,col,2.5); dot(LP_X-14,ty,col,2.5);
+  } else {
+    const ty = rpy(b.lpi);
+    line([[bx,by],[bx,ty],[RP_X+14,ty]], col, 1.3);
+    dot(bx,by,col,2.5); dot(RP_X+14,ty,col,2.5);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEGEND
+// ═══════════════════════════════════════════════════════════════════════════
+const LGX=1300, LGY=870;
+box(LGX-8, LGY-14, 192, 154, P.comp, P.compBdr, 5, 1);
+label('BUS LEGEND', LGX+88, LGY, P.hi, 8, 'center', true);
+[
+  ['SPI2 Display',    'lcd'],
+  ['I²S Audio',       'i2s'],
+  ['WS2812B / RMT',   'led'],
+  ['9 × Buttons',     'btn'],
+  ['SPI3 SD Card',    'sd'],
+  ['nRF24L01+',       'nrf'],
+  ['3.3 V Power',     'pwr'],
+  ['Battery / ADC',   'adc'],
+  ['Ground',          'gnd'],
+].forEach(([n,b],i)=>{
+  const ly = LGY+16+i*14, col=busCol(b);
+  line([[LGX,ly],[LGX+24,ly]], col, 2);
+  dot(LGX,ly,col,2.5); dot(LGX+24,ly,col,2.5);
+  label(n, LGX+30, ly, col, 8);
+});
+
+// ── Power rails summary (dashed lines on spines) ─────────────────────────
+line([[LS-4,lpy(0)],[LS-4,lpy(22)]], P.pwr, 1, [7,4]);
+line([[LS-12,lpy(0)],[LS-12,lpy(23)]], P.gnd, 1, [7,4]);
+label('3V3',LP_X-58,lpy(22),P.pwr,7,'center');
+label('GND',LP_X-58,lpy(23),P.gnd,7,'center');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WARNING ANNOTATIONS
+// ═══════════════════════════════════════════════════════════════════════════
+function warn(t, x, y, col){
+  label('⚠  '+t, x, y, col||P.warn, 7.5);
+}
+warn('MADCTL=0x60 landscape. Try 0xA0 if image is flipped.',
+  LCD_X, LCD_Y+LCD_H+14, P.lcd);
+warn('XSMT must be tied to 3.3V to unmute DAC output.',
+  PCM_X, PCM_Y+PCM_H+14, P.i2s);
+warn('Add 100µF+100nF bypass caps on nRF24 VCC pin.',
+  NRF_X-180, NRF_Y+NRF_H+14, P.nrf);
+warn('Add 300Ω resistor in series on DIN before LED chain.',
+  LED_X-140, LED_Y+LED_H+14, P.led);
+warn('Add 10KΩ pull-up resistor on SD MISO to 3.3V.',
+  SD_X-100, SD_Y+SD_H+14, P.sd);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TITLE BAR
+// ═══════════════════════════════════════════════════════════════════════════
+label('IonOS · ESP32-S3 · Full Wiring Diagram · v1.0',
+  CW/2, 14, P.hi, 12, 'center', true);
+label('ST7789V 320×240 Landscape · PCM5102A I²S DAC · WS2812B×7 · nRF24L01+ · microSD · 9 Buttons · LiPo+TP4056',
+  CW/2, 30, '#1e4a1e', 8, 'center');
+
+// ═══════════════════════════════════════════════════════════════════════════
+// QUICK-REF PIN TABLE  (very bottom)
+// ═══════════════════════════════════════════════════════════════════════════
+const TR = [
+  ['ST7789V SPI2',  'MOSI=11  SCLK=12  CS=10  DC=9  RST=8  BLK=13',   P.lcd],
+  ['PCM5102A I²S',  'BCK=4   LRCK=5   DATA=6',                          P.i2s],
+  ['WS2812B RMT',   'DIN=48',                                            P.led],
+  ['SD Card SPI3',  'MOSI=35  SCLK=36  MISO=37  CS=38',                 P.sd],
+  ['nRF24L01+',     'MOSI=2  MISO=3  SCLK=7  CSN=39  CE=40  IRQ=41',   P.nrf],
+  ['Buttons ×9',    'UP=14 DN=15 LT=16 RT=17 X=20 A=18 B=19 ST=21 MN=47', P.btn],
+  ['Battery',       'CHG=GPIO0  ADC=GPIO1  (100KΩ+100KΩ divider)',      P.adc],
+];
+const TY = CH - 62;
+box(12, TY-6, CW-24, 60, '#060e06', '#1a2a1a', 4, 0.5);
+TR.forEach(([name, pins, col], i) => {
+  const tx = 20 + i * 214;
+  label(name, tx, TY+8, col, 7.5, 'left', true);
+  label(pins,  tx, TY+22, '#2a5a2a', 6.5);
+});
+label('Apache 2.0 · IonOS', CW-10, CH-8, P.dim, 7, 'right');
+</script>
+</body>
+</html>
